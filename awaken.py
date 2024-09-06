@@ -257,6 +257,9 @@ tracking_pixels = {
 # Function to compute TF-IDF and find important terms
 
 
+# Function to compute TF-IDF and find important terms
+
+
 def extract_significant_terms(texts):
     # TF-IDF vectorizer
     vectorizer = TfidfVectorizer(stop_words='english')
