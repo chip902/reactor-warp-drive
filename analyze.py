@@ -2,6 +2,7 @@ from matplotlib import pyplot as plt
 import pandas as pd
 from collections import Counter
 from nltk.tokenize import RegexpTokenizer
+from sklearn.feature_extraction.text import TfidfVectorizer
 from tqdm import tqdm
 import json
 
@@ -13,10 +14,13 @@ tracking_pixels = {
         "fbpixel.com"
     ],
     "Google Analytics": [
-        "gtag.js",
         "analytics.js",
         "google-analytics.com",
         "statcounter.com"  # not exactly a marketing pixel, but sometimes used
+    ],
+    "Google Ads": [
+        "doubleclick.net",
+        "adservice.google"
     ],
     "Hotjar": [
         "hotjar.com/hotjar.js",
@@ -257,6 +261,18 @@ def find_tracking_pixels(action_text, pixel_dict):
                 detected_pixels[pixel_name] += 1
     return detected_pixels
 
+
+def extract_js_function_calls(texts):
+    # Use regular expression to find all function calls in the Action Settings column
+    js_functions = []
+    for text in texts:
+        js_functions.extend(re.findall(r'\b\w+(?= \(|\))', text))
+
+    # Count the frequency of each function call name
+    freq = Counter(js_functions)
+
+    return freq
+
 # Function to perform NLP on text data for JavaScript functions and tracking pixels
 
 
@@ -293,6 +309,24 @@ def visualize_tracking_pixels(pixel_data):
     plt.gca().invert_yaxis()
     plt.show()
 
+
+def extract_significant_terms(texts):
+    # TF-IDF vectorizer
+    vectorizer = TfidfVectorizer(stop_words='english')
+    X = vectorizer.fit_transform(texts)
+
+    # Sum the TF-IDF values for each word
+    terms = vectorizer.get_feature_names_out()
+    scores = X.sum(axis=0).A1
+    term_scores = {terms[i]: scores[i] for i in range(len(terms))}
+
+    # Sort by importance (descending)
+    sorted_terms = dict(
+        sorted(term_scores.items(), key=lambda item: item[1], reverse=True))
+
+    return sorted_terms
+
+
 # Main analysis function
 
 
@@ -322,6 +356,29 @@ def main():
         # Perform NLP and tracking pixel detection
         significant_js_functions, pixel_counts = extract_significant_functions(
             action_settings, starting_dictionary, tracking_pixels)
+
+        # Extract the most common JavaScript function call names
+        js_function_calls_freq = extract_js_function_calls(action_settings)
+
+        js_function_calls_freq = extract_js_function_calls(action_settings)
+
+        significant_terms = extract_significant_terms(action_settings)
+
+        print("Significant terms found:", significant_terms)
+        print("Most common JS function calls:")
+        for func, freq in js_function_calls_freq.most_common(10):
+            print(f"  {func}: {freq}")
+
+        # Visualize the top 5 most frequent JavaScript function call names
+        top_5_js_functions = sorted(
+            js_function_calls_freq.items(), key=lambda x: x[1], reverse=True)[:5]
+
+        js_functions, freqs = zip(*top_5_js_functions)
+        plt.bar(js_functions, freqs)
+        plt.xlabel('JS Function Call')
+        plt.ylabel('Frequency')
+        plt.title('Top 5 Most Frequent JS Function Calls')
+        plt.show()
 
         # Save the significant JS functions to a JSON file
         with open("significant_js_functions.json", "w") as f:
