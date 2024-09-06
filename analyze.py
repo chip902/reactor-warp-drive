@@ -5,6 +5,7 @@ from nltk.tokenize import RegexpTokenizer
 from sklearn.feature_extraction.text import TfidfVectorizer
 from tqdm import tqdm
 import json
+import re
 
 # Define your tracking pixels
 tracking_pixels = {
@@ -40,7 +41,7 @@ tracking_pixels = {
         "epsilon.net",
         "consentbox.io"
     ],
-    "Adobe Analytics": [
+    "Hard Coded Adobe Analytics": [
         "adobe.com/analytics",
         "omniture.com"
     ],
@@ -266,7 +267,16 @@ def extract_js_function_calls(texts):
     # Use regular expression to find all function calls in the Action Settings column
     js_functions = []
     for text in texts:
-        js_functions.extend(re.findall(r'\b\w+(?= \(|\))', text))
+        # Find JavaScript function call names with 3 or more characters
+        matches = re.findall(r'\b\w{3,}\b', text)
+
+        # Check if "function" appears and extract the next word as a separate function name
+        words = re.split('\s+', text)
+        for i in range(len(words) - 1):
+            if words[i].lower() == 'function' and len(words[i+1]) >= 3:
+                matches.append(re.escape(words[i+1]))
+
+        js_functions.extend(matches)
 
     # Count the frequency of each function call name
     freq = Counter(js_functions)
@@ -370,14 +380,14 @@ def main():
             print(f"  {func}: {freq}")
 
         # Visualize the top 5 most frequent JavaScript function call names
-        top_5_js_functions = sorted(
-            js_function_calls_freq.items(), key=lambda x: x[1], reverse=True)[:5]
+        top_10_js_functions = sorted(
+            js_function_calls_freq.items(), key=lambda x: x[1], reverse=True)[:10]
 
-        js_functions, freqs = zip(*top_5_js_functions)
+        js_functions, freqs = zip(*top_10_js_functions)
         plt.bar(js_functions, freqs)
         plt.xlabel('JS Function Call')
         plt.ylabel('Frequency')
-        plt.title('Top 5 Most Frequent JS Function Calls')
+        plt.title('Top 10 Most Frequent JS Function Calls')
         plt.show()
 
         # Save the significant JS functions to a JSON file
