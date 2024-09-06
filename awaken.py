@@ -16,10 +16,13 @@ tracking_pixels = {
         "fbpixel.com"
     ],
     "Google Analytics": [
-        "gtag.js",
         "analytics.js",
         "google-analytics.com",
         "statcounter.com"
+    ],
+    "Google Ads": [
+        "doubleclick",
+        "adservice.google"
     ],
     "Hotjar": [
         "hotjar.com/hotjar.js",
@@ -250,6 +253,7 @@ tracking_pixels = {
     ]
 }
 
+
 # Function to compute TF-IDF and find important terms
 
 
@@ -267,10 +271,7 @@ def extract_significant_terms(texts):
     sorted_terms = dict(
         sorted(term_scores.items(), key=lambda item: item[1], reverse=True))
 
-    # Filter out terms with low importance (optional threshold)
-    significant_terms = {k: v for k, v in sorted_terms.items() if v > 1}
-
-    return significant_terms
+    return sorted_terms
 
 
 def main():
