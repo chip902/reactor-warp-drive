@@ -2,9 +2,8 @@ from matplotlib import pyplot as plt
 import pandas as pd
 from collections import Counter
 from nltk.tokenize import RegexpTokenizer
-from sklearn.feature_extraction.text import TfidfVectorizer
 from tqdm import tqdm
-import json
+import csv
 import re
 
 # Define your tracking pixels
@@ -251,16 +250,6 @@ tracking_pixels = {
         "dataxup.com/programmatic-advertising"
     ]
 }
-# Function to check if a script contains tracking pixels
-
-
-def find_tracking_pixels(action_text, pixel_dict):
-    detected_pixels = Counter()
-    for pixel_name, pixel_patterns in pixel_dict.items():
-        for pattern in pixel_patterns:
-            if pattern in action_text:
-                detected_pixels[pixel_name] += 1
-    return detected_pixels
 
 
 def extract_js_function_calls(texts):
@@ -271,7 +260,7 @@ def extract_js_function_calls(texts):
         matches = re.findall(r'\b\w{3,}\b', text)
 
         # Check if "function" appears and extract the next word as a separate function name
-        words = re.split('\s+', text)
+        words = re.split(r'\s+', text)
         for i in range(len(words) - 1):
             if words[i].lower() == 'function' and len(words[i+1]) >= 3:
                 matches.append(re.escape(words[i+1]))
@@ -283,61 +272,92 @@ def extract_js_function_calls(texts):
 
     return freq
 
-# Function to perform NLP on text data for JavaScript functions and tracking pixels
+
+def save_js_functions_to_csv(js_functions):
+    # Convert dictionary to DataFrame
+    df_js_functions = pd.DataFrame(list(js_functions.items()), columns=[
+                                   'JavaScript Function', 'Count'])
+    # Save DataFrame to CSV with quoting to handle embedded newlines and commas
+    df_js_functions.to_csv("significant_js_functions.csv",
+                           index=False, quoting=csv.QUOTE_ALL)
+    print("Significant JavaScript functions saved to significant_js_functions.csv")
 
 
-def extract_significant_functions(texts, initial_js_dict, pixel_dict):
+def save_tracking_pixels_to_csv(results):
+    # Convert list of results to DataFrame
+    flattened_results = []
+    for result in results:
+        for source in result["Source Code"]:
+            flattened_results.append({
+                "Property Name": result["Property Name"],
+                "Detected Pixel": source["pixel_name"],
+                "Source Code": source["source_code"]
+            })
+    df_pixels = pd.DataFrame(flattened_results)
+    # Save DataFrame to CSV with quoting to handle embedded newlines and commas
+    df_pixels.to_csv("tracking_pixel_report_with_source.csv",
+                     index=False, quoting=csv.QUOTE_ALL)
+    print("Tracking pixel report saved to tracking_pixel_report_with_source.csv")
+
+
+def find_tracking_pixels(action_text, pixel_dict):
+    detected_pixels = Counter()
+    detected_source = []
+
+    for pixel_name, pixel_patterns in pixel_dict.items():
+        for pattern in pixel_patterns:
+            if pattern in action_text:
+                detected_pixels[pixel_name] += 1
+                detected_source.append(
+                    {"pixel_name": pixel_name, "source_code": action_text})
+    return detected_pixels, detected_source
+
+
+def extract_significant_functions(texts, initial_js_dict, pixel_dict, property_names):
     tokenizer = RegexpTokenizer(r'\w+')
     js_token_counts = Counter(initial_js_dict)
     pixel_counts = Counter()
+    results = []
 
-    for text in tqdm(texts, desc="Processing text data"):
+    for i, text in enumerate(tqdm(texts, desc="Processing text data")):
+        property_name = property_names[i]
+
         # Tokenize and count JS functions
         tokens = tokenizer.tokenize(text.lower())
         js_token_counts.update(tokens)
 
         # Check for tracking pixels in the same text
-        pixel_counts.update(find_tracking_pixels(text, pixel_dict))
+        detected_pixels, detected_source = find_tracking_pixels(
+            text, pixel_dict)
+
+        # Add result to array
+        if detected_pixels:
+            results.append({
+                "Property Name": property_name,
+                "Detected Pixels": detected_pixels,
+                "Source Code": detected_source
+            })
 
     # Filter significant JS functions
     significant_js_functions = {token: count for token,
                                 count in js_token_counts.items() if count > 1}
-    return significant_js_functions, pixel_counts
-
-# Function to visualize the tracking pixel data
+    return significant_js_functions, pixel_counts, results
 
 
 def visualize_tracking_pixels(pixel_data):
-    df = pd.DataFrame(pixel_data.items(), columns=[
-                      "Tracking Pixel", "Count"]).sort_values(by="Count", ascending=False)
+    df = pd.DataFrame(list(pixel_data.items()), columns=[
+                      'Tracking Pixel', 'Count'])
 
-    plt.figure(figsize=(10, 8))
-    plt.barh(df["Tracking Pixel"], df["Count"], color="skyblue")
-    plt.xlabel("Count")
-    plt.ylabel("Tracking Pixel")
-    plt.title("3rd-Party Tracking Pixels Detected")
-    plt.gca().invert_yaxis()
-    plt.show()
+    # Sort the values by 'Count' in descending order
+    df = df.sort_values(by="Count", ascending=False)
 
-
-def extract_significant_terms(texts):
-    # TF-IDF vectorizer
-    vectorizer = TfidfVectorizer(stop_words='english')
-    X = vectorizer.fit_transform(texts)
-
-    # Sum the TF-IDF values for each word
-    terms = vectorizer.get_feature_names_out()
-    scores = X.sum(axis=0).A1
-    term_scores = {terms[i]: scores[i] for i in range(len(terms))}
-
-    # Sort by importance (descending)
-    sorted_terms = dict(
-        sorted(term_scores.items(), key=lambda item: item[1], reverse=True))
-
-    return sorted_terms
-
-
-# Main analysis function
+    # Plot the data
+    plt.figure(figsize=(12, 8))
+    plt.barh(df['Tracking Pixel'], df['Count'], color='skyblue')
+    plt.xlabel('Count')
+    plt.ylabel('Tracking Pixel')
+    plt.title('3rd-Party Tracking Pixels Detected')
+    plt.gca().invert_yaxis()  # Invert the Y-axis to have the largest on top
 
 
 def main():
@@ -353,31 +373,34 @@ def main():
 
     try:
         # Load the CSV file
-        df = pd.read_csv("adobe_launch_rules_with_actions.csv")
+        df = pd.read_csv(
+            "adobe_launch_rules_with_actions_filtered.csv", low_memory=False)
 
         # Ensure the relevant columns exist
-        if "Action Settings" not in df.columns:
+        if "Action Settings" not in df.columns or "Property Name" not in df.columns:
             raise Exception(
-                "The CSV file must contain 'Action Settings' column.")
+                "The CSV file must contain 'Action Settings' and 'Property Name' columns.")
 
-        # Extract action settings for NLP analysis
+        # Extract action settings and property names for NLP analysis
         action_settings = df["Action Settings"].dropna().str.lower().tolist()
+        property_names = df["Property Name"].dropna().tolist()
+        js_function_calls_freq = extract_js_function_calls(action_settings)
 
         # Perform NLP and tracking pixel detection
-        significant_js_functions, pixel_counts = extract_significant_functions(
-            action_settings, starting_dictionary, tracking_pixels)
+        significant_js_functions, pixel_counts, results = extract_significant_functions(
+            action_settings, starting_dictionary, tracking_pixels, property_names
+        )
 
-        # Extract the most common JavaScript function call names
-        js_function_calls_freq = extract_js_function_calls(action_settings)
+        # Save the significant JS functions to a CSV file
+        save_js_functions_to_csv(significant_js_functions)
 
-        js_function_calls_freq = extract_js_function_calls(action_settings)
+        # Save the tracking pixel counts and raw source data to a CSV file
+        save_tracking_pixels_to_csv(results)
 
-        significant_terms = extract_significant_terms(action_settings)
+        print("Significant JavaScript functions and tracking pixel analysis complete.")
 
-        print("Significant terms found:", significant_terms)
-        print("Most common JS function calls:")
-        for func, freq in js_function_calls_freq.most_common(10):
-            print(f"  {func}: {freq}")
+        # Visualize the tracking pixel data
+        visualize_tracking_pixels(pixel_counts)
 
         # Visualize the top 5 most frequent JavaScript function call names
         top_10_js_functions = sorted(
@@ -389,19 +412,6 @@ def main():
         plt.ylabel('Frequency')
         plt.title('Top 10 Most Frequent JS Function Calls')
         plt.show()
-
-        # Save the significant JS functions to a JSON file
-        with open("significant_js_functions.json", "w") as f:
-            json.dump(significant_js_functions, f, indent=4)
-
-        # Save the tracking pixel counts to a JSON file
-        with open("tracking_pixel_report.json", "w") as f:
-            json.dump(pixel_counts, f, indent=4)
-
-        print("Significant JavaScript functions and tracking pixel analysis complete.")
-
-        # Visualize the tracking pixel data
-        visualize_tracking_pixels(pixel_counts)
 
     except Exception as e:
         print(f"Error during processing: {e}")

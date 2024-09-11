@@ -27,11 +27,11 @@ headers = {
 }
 
 
-def get_token(client_id, client_secret):
+def get_token(ID, secret):
     data = {
         "grant_type": "client_credentials",
-        "client_id": client_id,
-        "client_secret": client_secret,
+        "client_id": ID,
+        "client_secret": secret,
         "scope": "AdobeID,openid,read_organizations,additional_info.job_function,additional_info.projectedProductContext,additional_info.roles",
     }
     response = requests.post(token_url, data=data, headers={
@@ -75,11 +75,17 @@ def get_rules_for_property(property_id, access_token):
     }
     rules_url = f"{base_url}/properties/{property_id}/rules"
     response = requests.get(rules_url, headers=auth_headers)
+
     if response.status_code != 200:
         raise Exception(f"Failed to fetch rules for property {
                         property_id}: {response.text}")
+
     rules = response.json()["data"]
-    return rules
+
+    # Filter out rules that start with 'Archive'
+    filtered_rules = [
+        rule for rule in rules if not rule["attributes"]["name"].startswith("Archive")]
+    return filtered_rules
 
 
 def get_actions_for_rule(property_id, rule_id, access_token):
@@ -90,13 +96,16 @@ def get_actions_for_rule(property_id, rule_id, access_token):
     }
     actions_url = f"{base_url}/rules/{rule_id}/rule_components"
     response = requests.get(actions_url, headers=auth_headers)
+
     if response.status_code == 404:
         print(f"Actions not found for rule {
               rule_id} in property {property_id}. Skipping.")
         return []
+
     if response.status_code != 200:
         raise Exception(f"Failed to fetch actions for rule {
                         rule_id}: {response.text}")
+
     actions = response.json()["data"]
     return actions
 
@@ -144,11 +153,18 @@ def main():
                     except Exception as e:
                         print(f"Failed to fetch actions for rule {
                               rule_id}: {e}")
-                save_progress(all_rules)  # Save progress after each property
             except Exception as e:
                 print(e)
 
-        print("Data saved to adobe_launch_rules_with_actions.csv")
+        df = pd.DataFrame(all_rules)
+
+        # Remove rows where Property Name starts with "Archive"
+        df_filtered = df[~df['Property Name'].str.startswith("Archive")]
+
+        # Save the filtered DataFrame to a new CSV file
+        df_filtered.to_csv(
+            "adobe_launch_rules_with_actions_filtered.csv", index=False)
+        print("Filtered data saved to adobe_launch_rules_with_actions_filtered.csv")
 
     except Exception as e:
         print("Error during initialization:", e)
