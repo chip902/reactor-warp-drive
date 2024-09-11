@@ -1,10 +1,12 @@
-from matplotlib import pyplot as plt
-import pandas as pd
-from collections import Counter
-from nltk.tokenize import RegexpTokenizer
-from tqdm import tqdm
+"""This module analyzes data from Adobe Launch and figures out what AdTech is installed on it."""
+
 import csv
 import re
+from collections import Counter
+import pandas as pd
+from nltk.tokenize import RegexpTokenizer
+from tqdm import tqdm
+from matplotlib import pyplot as plt
 
 # Define your tracking pixels
 tracking_pixels = {
@@ -248,6 +250,214 @@ tracking_pixels = {
     ],
     "DataXu Platform with Programmatic Advertising": [
         "dataxup.com/programmatic-advertising"
+    ],
+    "AdRoll": [
+        "a.roll-1.com",
+        "adroll.com/tracking"
+    ],
+    "Criteo": [
+        "criteo.net",
+        "criteo.com/tracking"
+    ],
+    "The Trade Desk (TTD)": [
+        "thetradedesk.com/tracking"
+    ],
+    "AppNexus": [
+        "appnexus.net",
+        "appnexus.com/tracking"
+    ],
+    "Yahoo Dot Pixels": [
+        "b.yahoo.com",
+        "dot-pixel.yahoo.co.jp"
+    ],
+    "Bing Ads": [
+        "bat.bing.com",
+        "adnexus.net/bingads"
+    ],
+    "Pinterest Pixel": [
+        "pinterest.com/px",
+        "ct.pinterest.com"
+    ],
+    "Snapchat Pixel": [
+        "snapchat.com/pixel",
+        "sc-static.net/pixel"
+    ],
+    "TikTok Ads Pixel": [
+        "tiktok.com/ads/pixel",
+        "analytics.tiktok.com"
+    ],
+    "Yandex Metrica": [
+        "mc.yandex.ru",
+        "metrika.yandex.com"
+    ],
+    "VKontakte Pixel": [
+        "vk.com/pixel",
+        "vkontakte.ru/pixel"
+    ],
+    "Yahoo Flurry Analytics": [
+        "flurry.com/analytics",
+        "data.flurry.com/analytics"
+    ],
+    "Adobe Advertising Cloud (formerly Tubemogul)": [
+        "adobedtm.com/tubemogul",
+        "adobedc.net/tubemogul"
+    ],
+    "Salesforce Marketing Cloud (ExactTarget)": [
+        "salesforce.com/marketingcloud",
+        "exacttarget.com/tracking"
+    ],
+    "Optimizely": [
+        "optimizely.net",
+        "optimizely.com/tracking"
+    ],
+    "FullStory": [
+        "fullstory.com/tracking"
+    ],
+    "Heap with React Native": [
+        "heap.io/react-native"
+    ],
+    "Sentry for Error Tracking": [
+        "sentry.io/error-tracking",
+        "sentry-cdn.com/error-tracking"
+    ],
+    "Baidu Tongji": [
+        "hm.baidu.com",
+        "tongji.baidu.com"
+    ],
+    "Alibaba Analytics": [
+        "alibaba.com/analytics",
+        "aliyuncs.com/analytics"
+    ],
+    "Yahoo Gemini": [
+        "gemini.yahoo.com",
+        "admanager.yahoo.com/gemini"
+    ],
+    "Verizon Media (Oath)": [
+        "verizondigitalmedia.com",
+        "oath.com/tracking"
+    ],
+    "AOL Advertising": [
+        "aolads.com",
+        "adtech.aol.com"
+    ],
+    "Index Exchange (IX)": [
+        "indexexchange.com",
+        "ix-dsp.com"
+    ],
+    "AppsFlyer": [
+        "appsflyer.net",
+        "attribution-service.com"
+    ],
+    "Adjust": [
+        "adjust.com/tracking",
+        "adjust.io/tracking"
+    ],
+    "Branch Metrics": [
+        "branch.io/metrics",
+        "bnc.lt/metrics"
+    ],
+    "Kochava": [
+        "kochava.net",
+        "kochavatrk.com"
+    ],
+    "Tune": [
+        "tune.com/tracking",
+        "mobile-service.com"
+    ],
+    "RadiumOne": [
+        "radiumone.com/tracking"
+    ],
+    "Rocket Fuel": [
+        "rfihub.net",
+        "rocketfuel.com/tracking"
+    ],
+    "Adform": [
+        "adform.net",
+        "adform.com/tracking"
+    ],
+    "The Nielsen Company (Nielsen Digital Ad Ratings)": [
+        "nielsen-online.com/dart",
+        "nielsen.com/digital-ad-ratings"
+    ],
+    "ComScore": [
+        "scorecardresearch.com",
+        "comscore.net"
+    ],
+    "IAS (Integral Ad Science)": [
+        "integralads.com",
+        "iasds001.com"
+    ],
+    "DoubleVerify": [
+        "doubleverify.com/tracking",
+        "dvtag.net/tracking"
+    ],
+    "Integral Ad Science (IAS)": [
+        "integralads.com",
+        "iasds001.com"
+    ],
+    "MediaMath": [
+        "mediamath.com",
+        "mm-adnet.com"
+    ],
+    "The Rubicon Project (Rubicon)": [
+        "rubiconproject.com",
+        "fastflip.com/rubicon"
+    ],
+    "Adserver Plus": [
+        "adserverplus.com",
+        "as-us.com"
+    ],
+    "Smaato": [
+        "smaato.net",
+        "smaato.com/tracking"
+    ],
+    "InMobi": [
+        "inmobi.com",
+        "w.inmobi.com"
+    ],
+    "Unity Ads": [
+        "unityads.unity3d.com",
+        "unityads.com"
+    ],
+    "IronSource": [
+        "ironsrc.net",
+        "iron-src.com"
+    ],
+    "Vungle": [
+        "vungle.com/tracking",
+        "static.vungle.com/tracking"
+    ],
+    "Chartboost": [
+        "chartboost.com",
+        "answerscloud.com/chartboost"
+    ],
+    "Applovin": [
+        "applovin.com/tracking",
+        "applvn.com/tracking"
+    ],
+    "StartApp": [
+        "startapp.com/tracking",
+        "startappexchange.com/tracking"
+    ],
+    "Tapsense": [
+        "tapsense.net",
+        "tapsense-analytics.com"
+    ],
+    "Tapjoy": [
+        "tapjoy.com/tracking",
+        "tapjoyads.com/tracking"
+    ],
+    "Supersonic Ads": [
+        "supersonicads.net",
+        "supersonicads-server.com"
+    ],
+    "Nanigans (now part of Adobe)": [
+        "nanigans.net",
+        "adobedc.net/nanigans"
+    ],
+    "Celtra": [
+        "celtra.com/tracking",
+        "celtratech.net/tracking"
     ]
 }
 
