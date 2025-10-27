@@ -1,19 +1,18 @@
-import os
-import json
+"""This module scans an Adobe Launch Container to collect Properties and make a data source for Analyze."""
+
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 import pandas as pd
 from tqdm import tqdm
-from dotenv import load_dotenv
-
-# Load environment variables from .env file
-load_dotenv()
+from decouple import config
 
 # Configuration
-api_key = os.getenv("API_KEY")
-client_id = os.getenv("CLIENT_ID")
-client_secret = os.getenv("CLIENT_SECRET")
-company_id = os.getenv("COMPANY_ID")
-org_id = os.getenv("ORG_ID")
+api_key = config("API_KEY")
+client_id = config("CLIENT_ID")
+client_secret = config("CLIENT_SECRET")
+company_id = config("COMPANY_ID")
+org_id = config("ORG_ID")
 
 # URLs
 base_url = "https://reactor.adobe.io"
@@ -27,15 +26,37 @@ headers = {
 }
 
 
+# Resilient HTTP session with retries/backoff
+retries = Retry(
+    total=5,
+    backoff_factor=1.25,
+    status_forcelist=[429, 500, 502, 503, 504],
+    allowed_methods=["GET", "POST"],
+)
+session = requests.Session()
+session.headers.update(headers)
+session.mount("https://", HTTPAdapter(max_retries=retries))
+session.mount("http://", HTTPAdapter(max_retries=retries))
+
+
 def get_token(ID, secret):
+    print(f"This is the Client ID: {ID}")
     data = {
         "grant_type": "client_credentials",
         "client_id": ID,
         "client_secret": secret,
         "scope": "AdobeID,openid,read_organizations,additional_info.job_function,additional_info.projectedProductContext,additional_info.roles",
     }
-    response = requests.post(token_url, data=data, headers={
-                             "Content-Type": "application/x-www-form-urlencoded"})
+    # Important: Do NOT send the default session headers (x-api-key, Reactor Accept)
+    # to the IMS token endpoint. Use explicit headers only for IMS.
+    response = requests.post(
+        token_url,
+        data=data,
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "application/json",
+        },
+    )
     if response.status_code != 200:
         raise Exception(f"Failed to get access token: {response.text}")
     return response.json()["access_token"]
@@ -52,8 +73,8 @@ def get_all_properties(access_token):
     page = 1
 
     while True:
-        response = requests.get(f"{properties_url}?page[number]={
-                                page}&page[size]=100", headers=auth_headers)
+        response = session.get(
+            f"{properties_url}?page[number]={page}&page[size]=100", headers=auth_headers)
         if response.status_code != 200:
             raise Exception(f"Failed to fetch properties: {response.text}")
 
@@ -74,11 +95,11 @@ def get_rules_for_property(property_id, access_token):
         "x-gw-ims-org-id": org_id
     }
     rules_url = f"{base_url}/properties/{property_id}/rules"
-    response = requests.get(rules_url, headers=auth_headers)
+    response = session.get(rules_url, headers=auth_headers)
 
     if response.status_code != 200:
-        raise Exception(f"Failed to fetch rules for property {
-                        property_id}: {response.text}")
+        raise Exception(
+            f"Failed to fetch rules for property {property_id}: {response.text}")
 
     rules = response.json()["data"]
 
@@ -95,16 +116,16 @@ def get_actions_for_rule(property_id, rule_id, access_token):
         "x-gw-ims-org-id": org_id
     }
     actions_url = f"{base_url}/rules/{rule_id}/rule_components"
-    response = requests.get(actions_url, headers=auth_headers)
+    response = session.get(actions_url, headers=auth_headers)
 
     if response.status_code == 404:
-        print(f"Actions not found for rule {
-              rule_id} in property {property_id}. Skipping.")
+        print(
+            f"Actions not found for rule {rule_id} in property {property_id}. Skipping.")
         return []
 
     if response.status_code != 200:
-        raise Exception(f"Failed to fetch actions for rule {
-                        rule_id}: {response.text}")
+        raise Exception(
+            f"Failed to fetch actions for rule {rule_id}: {response.text}")
 
     actions = response.json()["data"]
     return actions
@@ -123,38 +144,49 @@ def main():
 
         all_rules = []
 
-        for prop in tqdm(properties, desc="Processing properties"):
-            prop_id = prop["id"]
-            prop_name = prop["attributes"]["name"]
+        try:
+            for i, prop in enumerate(tqdm(properties, desc="Processing properties"), start=1):
+                prop_id = prop["id"]
+                prop_name = prop["attributes"]["name"]
 
-            try:
-                rules = get_rules_for_property(prop_id, access_token)
-                for rule in tqdm(rules, desc=f"Processing rules for property {prop_id}", leave=False):
-                    rule_id = rule["id"]
-                    rule_name = rule["attributes"]["name"]
-                    rule_description = rule["attributes"].get(
-                        "description", "")
+                try:
+                    rules = get_rules_for_property(prop_id, access_token)
+                    for rule in tqdm(rules, desc=f"Processing rules for property {prop_id}", leave=False):
+                        rule_id = rule["id"]
+                        rule_name = rule["attributes"]["name"]
+                        rule_description = rule["attributes"].get(
+                            "description", "")
 
-                    try:
-                        actions = get_actions_for_rule(
-                            prop_id, rule_id, access_token)
-                        for action in actions:
-                            action_data = {
-                                "Property ID": prop_id,
-                                "Property Name": prop_name,
-                                "Rule ID": rule_id,
-                                "Rule Name": rule_name,
-                                "Rule Description": rule_description,
-                                "Action ID": action["id"],
-                                "Action Name": action["attributes"]["name"],
-                                "Action Settings": action["attributes"]["settings"],
-                            }
-                            all_rules.append(action_data)
-                    except Exception as e:
-                        print(f"Failed to fetch actions for rule {
-                              rule_id}: {e}")
-            except Exception as e:
-                print(e)
+                        try:
+                            actions = get_actions_for_rule(
+                                prop_id, rule_id, access_token)
+                            for action in actions:
+                                action_data = {
+                                    "Property ID": prop_id,
+                                    "Property Name": prop_name,
+                                    "Rule ID": rule_id,
+                                    "Rule Name": rule_name,
+                                    "Rule Description": rule_description,
+                                    "Action ID": action["id"],
+                                    "Action Name": action["attributes"]["name"],
+                                    "Action Settings": action["attributes"]["settings"],
+                                }
+                                all_rules.append(action_data)
+                        except Exception as e:
+                            print(
+                                f"Failed to fetch actions for rule {rule_id}: {e}")
+                except Exception as e:
+                    print(e)
+
+                # Periodic checkpoint every 5 properties
+                if i % 5 == 0:
+                    print("Checkpoint: saving partial progress...")
+                    save_progress(all_rules)
+
+        except KeyboardInterrupt:
+            print("\nInterrupted by user. Saving partial progress...")
+            save_progress(all_rules)
+            return
 
         df = pd.DataFrame(all_rules)
 

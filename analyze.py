@@ -1,12 +1,12 @@
 """This module analyzes data from Adobe Launch and figures out what AdTech is installed on it."""
-
-import csv
 import re
+import csv
 from collections import Counter
 import pandas as pd
 from nltk.tokenize import RegexpTokenizer
 from tqdm import tqdm
-from matplotlib import pyplot as plt
+import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt1
 
 # Define your tracking pixels
 tracking_pixels = {
@@ -18,7 +18,7 @@ tracking_pixels = {
     "Google Analytics": [
         "analytics.js",
         "google-analytics.com",
-        "statcounter.com"  # not exactly a marketing pixel, but sometimes used
+        "statcounter.com"
     ],
     "Google Ads": [
         "doubleclick.net",
@@ -540,13 +540,16 @@ def extract_significant_functions(texts, initial_js_dict, pixel_dict, property_n
         detected_pixels, detected_source = find_tracking_pixels(
             text, pixel_dict)
 
-        # Add result to array
+        # Add result to array if there are detected pixels
         if detected_pixels:
             results.append({
                 "Property Name": property_name,
                 "Detected Pixels": detected_pixels,
                 "Source Code": detected_source
             })
+
+        # Update pixel_counts with the results of find_tracking_pixels (whether or not pixels were detected)
+        pixel_counts += detected_pixels
 
     # Filter significant JS functions
     significant_js_functions = {token: count for token,
@@ -557,17 +560,16 @@ def extract_significant_functions(texts, initial_js_dict, pixel_dict, property_n
 def visualize_tracking_pixels(pixel_data):
     df = pd.DataFrame(list(pixel_data.items()), columns=[
                       'Tracking Pixel', 'Count'])
-
     # Sort the values by 'Count' in descending order
     df = df.sort_values(by="Count", ascending=False)
-
     # Plot the data
-    plt.figure(figsize=(12, 8))
-    plt.barh(df['Tracking Pixel'], df['Count'], color='skyblue')
-    plt.xlabel('Count')
-    plt.ylabel('Tracking Pixel')
-    plt.title('3rd-Party Tracking Pixels Detected')
-    plt.gca().invert_yaxis()  # Invert the Y-axis to have the largest on top
+    plt1.figure(figsize=(10, 8))
+    plt1.barh(df['Tracking Pixel'], df['Count'], color='skyblue')
+    plt1.xlabel('Count')
+    plt1.ylabel('Tracking Pixel')
+    plt1.title('3rd-Party Tracking Pixels Detected')
+    plt1.gca().invert_yaxis()  # Invert the Y-axis to have the largest on top
+    plt1.show()
 
 
 def main():
