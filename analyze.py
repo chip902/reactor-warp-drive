@@ -7,6 +7,9 @@ from nltk.tokenize import RegexpTokenizer
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import matplotlib.pyplot as plt1
+import requests
+from urllib.parse import urlparse
+import json
 
 # Define your tracking pixels
 tracking_pixels = {
@@ -572,6 +575,317 @@ def visualize_tracking_pixels(pixel_data):
     plt1.show()
 
 
+def detect_cms_from_action_settings(action_settings):
+    """
+    Detect Content Management System based on action settings and JavaScript patterns
+    """
+    cms_patterns = {
+        'WordPress': ['wp-content', 'wp-includes', 'wp-json', 'wordpress', 'wp-admin'],
+        'Drupal': ['drupal', 'sites/default', 'modules/node', 'themes/bartik'],
+        'Joomla': ['joomla', 'com_content', 'components/com_', 'templates/ja_'],
+        'Magento': ['magento', 'Mage.php', 'skin/frontend', 'js/mage/'],
+        'Shopify': ['shopify.com', 'cdn.shopify.com', 'Shopify.theme', 'Shopify.shop'],
+        'Wix': ['wix.com', 'wixstatic.com', 'wix-code-bridge', 'wix-cloud'],
+        'Squarespace': ['squarespace.com', 'static.squarespace.com', 'sqs-block'],
+        'Sitecore': ['sitecore', '/sitecore/', 'sc_emailform'],
+        'Adobe Experience Manager': ['aem', '/content/dam/', '/etc.clientlibs/'],
+        'HubSpot CMS': ['hubspot.com/cms', 'hs-content', 'hubspotcms'],
+        'Contentful': ['contentful.com', 'cdn.contentful.com', 'contentful'],
+        'Strapi': ['strapi.io', '/api/', 'strapi'],
+        'Ghost': ['ghost.org', 'ghost-api', 'ghost-content'],
+        'Craft CMS': ['craftcms.com', 'craft.js', 'craft/'],
+        'TYPO3': ['typo3', 'typo3conf', 'typo3temp'],
+        'Concrete5': ['concrete5', 'concrete-', 'ccm_'],
+        'ExpressionEngine': ['expressionengine', 'ee/', 'exp:'],
+        'SilverStripe': ['silverstripe', 'ss-', 'framework/'],
+        'Umbraco': ['umbraco', '/umbraco/', 'umbraco-']
+    }
+
+    detected_cms = []
+    text_to_analyze = ' '.join(action_settings).lower()
+
+    for cms, patterns in cms_patterns.items():
+        for pattern in patterns:
+            if pattern in text_to_analyze:
+                detected_cms.append(cms)
+                break
+
+    return ', '.join(detected_cms) if detected_cms else 'Not Detected'
+
+
+def extract_site_name_from_evar61(action_settings):
+    """
+    Extract site name from eVar61 patterns in action settings
+    """
+    evar61_patterns = [
+        # Original eVar61 patterns
+        r'evar61["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+        r's\.eVar61["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+        r'["\']eVar61["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+        r'variables\.eVar61["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+        r'setEVar\(61,\s*["\']([^"\']+)["\']',
+        r's\.eVar61\s*=\s*["\']([^"\']+)["\']',
+        r'61["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+
+        # Site Name variations
+        r'site_name["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+        r'["\']site_name["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+        r'siteName["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+        r'["\']siteName["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+        r'site\.name["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+        r'["\']site\.name["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+        r'variables\.site_name["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+        r'variables\.siteName["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+        r'setSiteName\(["\']([^"\']+)["\']',
+        r's\.siteName\s*=\s*["\']([^"\']+)["\']',
+        r's\.site_name\s*=\s*["\']([^"\']+)["\']',
+
+        # Other common variations
+        r'website_name["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+        r'["\']website_name["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+        r'websiteName["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+        r'["\']websiteName["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+        r'domain_name["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+        r'["\']domain_name["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+        r'property_name["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+        r'["\']property_name["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+
+        # Context-based patterns (might appear in comments or descriptions)
+        r'"site name"[^:]*:\s*["\']([^"\']+)["\']',
+        r'"siteName"[^:]*:\s*["\']([^"\']+)["\']',
+        r'Site Name[:\s]*["\']([^"\']+)["\']',
+        r'SITE_NAME[:\s]*["\']([^"\']+)["\']'
+    ]
+
+    text_to_analyze = ' '.join(action_settings)
+
+    for pattern in evar61_patterns:
+        matches = re.findall(pattern, text_to_analyze, re.IGNORECASE)
+        if matches:
+            # Return the first non-empty match, cleaned up
+            for match in matches:
+                if match.strip() and len(match.strip()) > 2:
+                    return match.strip()
+
+    return 'Not Found'
+
+
+def extract_server_domain_from_actions(action_settings, property_domains=None, primary_domain=None):
+    """
+    Extract server domain from Adobe Launch property configuration
+    Now uses property-level domains from the API
+    """
+    # Priority 1: Use property-level domains from API (most accurate)
+    if primary_domain and primary_domain != "Not Found":
+        return primary_domain
+
+    # Priority 2: Use any property-level domains
+    if property_domains and property_domains != "Not Found":
+        domains = property_domains.split(";")
+        if domains and domains[0].strip():
+            return domains[0].strip()
+
+    # Priority 3: Adobe Analytics/Launch specific server configurations
+    launch_server_patterns = [
+        r's\.server\s*=\s*["\']([^"\']+)["\']',
+        r'["\']server["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+        r'variables\.server["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+        r'setServer\(["\']([^"\']+)["\']',
+        r'trackingServer["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+        r'["\']trackingServer["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+        r'measurement["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+        r'["\']measurement["\']?\s*[:=]\s*["\']([^"\']+)["\']',
+    ]
+
+    # Priority 4: Window/document location (main site domain)
+    location_patterns = [
+        r'window\.location\.hostname\s*[:=]\s*["\']([^"\']+)["\']',
+        r'document\.location\.hostname\s*[:=]\s*["\']([^"\']+)["\']',
+        r'location\.host\s*[:=]\s*["\']([^"\']+)["\']',
+        r'window\.location\.host\s*[:=]\s*["\']([^"\']+)["\']',
+    ]
+
+    # Exclude known third-party domains that aren't the main site
+    excluded_domains = [
+        'adobedtm.com', 'omtrdc.net', 'sc.omtrdc.net', 'metrics.adobedtm.com',
+        'google-analytics.com', 'googletagmanager.com', 'doubleclick.net',
+        'facebook.com', 'facebook.net', 'connect.facebook.net',
+        'linkedin.com', 'licdn.com', 'analytics.linkedin.com',
+        'twitter.com', 'twimg.com', 'analytics.twitter.com',
+        'yahoo.com', 'yimg.com', 'analytics.yahoo.com',
+        'hotjar.com', 'cdn.hotjar.com',
+        'quantserve.com', 'quantcount.com',
+        'scorecardresearch.com',
+        'taboola.com', 'trc.taboola.com',
+        'outbrain.com', 'amplitude.com',
+        'segment.io', 'mixpanel.com',
+        'optimizely.com', 'cdn.optimizely.com',
+        'onestag.com', 'tealium.com', 'tiqcdn.com',
+        'cookielaw.org', 'onetrust.com', 'cdn.cookielaw.org',
+        'cookiebot.com', 'consentmanager.net',
+        'adnxs.com', 'adnxs.net', 'criteo.com',
+        'rubiconproject.com', 'indexexchange.com',
+        'amazon-adsystem.com', 'c.amazon-adsystem.com',
+        'googleadservices.com', 'google.com',
+        'googlesyndication.com', 'googleads.g.doubleclick.net'
+    ]
+
+    def is_third_party_domain(domain):
+        """Check if domain is a known third-party/analytics domain"""
+        domain_lower = domain.lower()
+        for excluded in excluded_domains:
+            if excluded.lower() in domain_lower:
+                return True
+        return False
+
+    def clean_domain(domain):
+        """Clean and validate domain"""
+        domain = domain.strip()
+        # Remove protocols
+        domain = re.sub(r'https?://', '', domain)
+        # Remove paths and query strings
+        domain = re.sub(r'/.*$', '', domain)
+        # Remove port numbers
+        domain = re.sub(r':\d+$', '', domain)
+        # Basic domain validation
+        if re.match(r'^[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', domain):
+            return domain
+        return None
+
+    text_to_analyze = ' '.join(action_settings)
+
+    # Try Priority 3: Adobe-specific server configurations
+    for pattern in launch_server_patterns:
+        matches = re.findall(pattern, text_to_analyze, re.IGNORECASE)
+        for match in matches:
+            cleaned = clean_domain(match)
+            if cleaned and not is_third_party_domain(cleaned):
+                return cleaned
+
+    # Try Priority 4: Location-based patterns
+    for pattern in location_patterns:
+        matches = re.findall(pattern, text_to_analyze, re.IGNORECASE)
+        for match in matches:
+            cleaned = clean_domain(match)
+            if cleaned and not is_third_party_domain(cleaned):
+                return cleaned
+
+    # Fallback: Look for domains that don't match third-party patterns
+    all_domains = re.findall(
+        r'\b([a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+)\b', text_to_analyze)
+    for domain in all_domains:
+        cleaned = clean_domain(domain)
+        if cleaned and not is_third_party_domain(cleaned) and len(domain) > 8:
+            return cleaned
+
+    return 'Not Found'
+
+
+def extract_cja_tech_strategy_data(df):
+    """
+    Extract CJA/WebSDK Tech Strategy data for each property
+    Now uses enhanced property-level data from app.py
+    """
+    results = []
+
+    # Check if we have the enhanced columns from updated app.py
+    has_property_data = all(col in df.columns for col in [
+                            'Property Domains', 'Primary Domain', 'Property Platform'])
+
+    # Group by property to get all actions for each property
+    grouped = df.groupby('Property Name')
+
+    for property_name, group in tqdm(grouped, desc="Extracting CJA Tech Strategy data"):
+        # Get all action settings for this property
+        action_settings = group['Action Settings'].dropna().tolist()
+
+        # Extract property-level data if available
+        property_domains = group['Property Domains'].iloc[0] if has_property_data else None
+        primary_domain = group['Primary Domain'].iloc[0] if has_property_data else None
+        platform = group['Property Platform'].iloc[0] if has_property_data else None
+
+        # Extract required data
+        site_name = extract_site_name_from_evar61(action_settings)
+        server_domain = extract_server_domain_from_actions(
+            action_settings, property_domains, primary_domain)
+        cms = detect_cms_from_action_settings(action_settings)
+
+        # Count Launch rules (number of rows for this property)
+        launch_rules_count = len(group)
+
+        # Use property-level site name if eVar61 not found and property domains exist
+        if site_name == 'Not Found' and primary_domain and primary_domain != 'Not Found':
+            site_name = primary_domain.replace('www.', '')
+
+        results.append({
+            'Site Name (eVar 61)': site_name,
+            'URL (Server Domain)': server_domain,
+            'Web Property': property_name,
+            'Content Management System': cms,
+            'Number of Launch Rules': launch_rules_count,
+            'Platform': platform if platform else 'Unknown'
+        })
+
+    return results
+
+
+def save_cja_tech_strategy_to_csv(results):
+    """
+    Save CJA/WebSDK Tech Strategy data to CSV
+    """
+    df_cja = pd.DataFrame(results)
+
+    # Save DataFrame to CSV
+    df_cja.to_csv("cja_websdk_tech_strategy.csv",
+                  index=False, quoting=csv.QUOTE_ALL)
+    print("CJA/WebSDK Tech Strategy data saved to cja_websdk_tech_strategy.csv")
+
+    # Also save a summary
+    print(f"\nSummary: {len(results)} properties analyzed")
+    print(
+        f"Properties with detected CMS: {sum(1 for r in results if r['Content Management System'] != 'Not Detected')}")
+    print(
+        f"Properties with eVar61 found: {sum(1 for r in results if r['Site Name (eVar 61)'] != 'Not Found')}")
+    print(
+        f"Properties with server domain found: {sum(1 for r in results if r['URL (Server Domain)'] != 'Not Found')}")
+
+    return df_cja
+
+
+def run_cja_analysis_only():
+    """
+    Standalone function to run only CJA/WebSDK Tech Strategy analysis
+    """
+    try:
+        # Load the CSV file
+        df = pd.read_csv(
+            "adobe_launch_rules_with_actions_filtered.csv", low_memory=False)
+
+        # Ensure the relevant columns exist
+        if "Action Settings" not in df.columns or "Property Name" not in df.columns:
+            raise Exception(
+                "The CSV file must contain 'Action Settings' and 'Property Name' columns.")
+
+        print("Starting CJA/WebSDK Tech Strategy Analysis...")
+        print("="*50)
+
+        cja_results = extract_cja_tech_strategy_data(df)
+        cja_df = save_cja_tech_strategy_to_csv(cja_results)
+
+        print("CJA/WebSDK Tech Strategy analysis complete.")
+        print("="*50)
+
+        # Display first few rows as preview
+        print("\nPreview of results:")
+        print(cja_df.head().to_string(index=False))
+
+        return cja_df
+
+    except Exception as e:
+        print(f"Error during CJA analysis: {e}")
+        return None
+
+
 def main():
     # Starting dictionary of JavaScript functions/keywords
     starting_dictionary = {
@@ -611,6 +925,17 @@ def main():
 
         print("Significant JavaScript functions and tracking pixel analysis complete.")
 
+        # NEW: Extract and save CJA/WebSDK Tech Strategy data
+        print("\n" + "="*50)
+        print("Starting CJA/WebSDK Tech Strategy Analysis...")
+        print("="*50)
+
+        cja_results = extract_cja_tech_strategy_data(df)
+        cja_df = save_cja_tech_strategy_to_csv(cja_results)
+
+        print("CJA/WebSDK Tech Strategy analysis complete.")
+        print("="*50)
+
         # Visualize the tracking pixel data
         visualize_tracking_pixels(pixel_counts)
 
@@ -631,6 +956,22 @@ def main():
 
 if __name__ == "__main__":
     import nltk
+    import sys
+
+    # Download required NLTK data
     nltk.download('stopwords')
     nltk.download('punkt')
-    main()
+
+    # Check command line arguments
+    if len(sys.argv) > 1 and sys.argv[1] == "--cja-only":
+        # Run only CJA/WebSDK Tech Strategy analysis
+        run_cja_analysis_only()
+    else:
+        # Run full analysis (original behavior)
+        main()
+
+    print("\n" + "="*50)
+    print("Analysis Options:")
+    print("- Run full analysis: python analyze.py")
+    print("- Run CJA analysis only: python analyze.py --cja-only")
+    print("="*50)
