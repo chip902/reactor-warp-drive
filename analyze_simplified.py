@@ -54,7 +54,7 @@ def extract_report_suites_from_config(action_settings):
         r'reportSuites\s*:\s*\{\s*prod\s*:\s*["\']([^"\']+)["\']\s*,\s*dev\s*:\s*["\']([^"\']+)["\']',
         r'dev\s*:\s*["\']([^"\']+)["\']\s*,\s*prod\s*:\s*["\']([^"\']+)["\']',
         r'prod\s*:\s*["\']([^"\']+)["\']\s*,\s*dev\s*:\s*["\']([^"\']+)["\']',
-        
+
         # Traditional Adobe Analytics patterns
         r's\.account\s*=\s*["\']([^"\']+)["\']',
         r'["\']account["\']?\s*[:=]\s*["\']([^"\']+)["\']',
@@ -64,7 +64,7 @@ def extract_report_suites_from_config(action_settings):
         r's_account\s*=\s*["\']([^"\']+)["\']',
         r's\.su\s*=\s*["\']([^"\']+)["\']',
         r'["\']s\.account["\']?\s*[:=]\s*["\']([^"\']+)["\']',
-        
+
         # Report suite patterns in comments or descriptions
         r'report\s*suite[^:]*:\s*["\']([^"\']+)["\']',
         r'reportSuite[^:]*:\s*["\']([^"\']+)["\']',
@@ -74,21 +74,49 @@ def extract_report_suites_from_config(action_settings):
 
     text_to_analyze = ' '.join(action_settings)
 
+    # Helper to detect domain-like strings (e.g., site.com, www.example.co.uk)
+    def looks_like_domain(value: str) -> bool:
+        value = value.strip()
+        # Basic domain pattern: something.suffix (optionally with subdomains)
+        return bool(re.search(r"\b[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}\b", value))
+
+    found_domain_like = False
+
     for pattern in report_suite_patterns:
-        matches = re.findall(pattern, text_to_analyze, re.IGNORECASE | re.DOTALL)
+        matches = re.findall(pattern, text_to_analyze,
+                             re.IGNORECASE | re.DOTALL)
         if matches:
             # Handle tuple matches from dev/prod patterns
             if isinstance(matches[0], tuple):
                 dev_suite, prod_suite = matches[0]
-                if prod_suite and prod_suite.strip():
-                    return f"Dev: {dev_suite.strip()}, Prod: {prod_suite.strip()}"
-                elif dev_suite and dev_suite.strip():
-                    return f"Dev: {dev_suite.strip()}"
+
+                prod_clean = prod_suite.strip() if prod_suite else ""
+                dev_clean = dev_suite.strip() if dev_suite else ""
+
+                # Prefer non-domain prod, then non-domain dev
+                if prod_clean and not looks_like_domain(prod_clean):
+                    return f"Dev: {dev_clean}, Prod: {prod_clean}" if dev_clean else prod_clean
+                if dev_clean and not looks_like_domain(dev_clean):
+                    return f"Dev: {dev_clean}"
+
+                # Both look like domains; remember and continue searching
+                if prod_clean or dev_clean:
+                    if (prod_clean and looks_like_domain(prod_clean)) or (dev_clean and looks_like_domain(dev_clean)):
+                        found_domain_like = True
             else:
                 # Handle single matches
                 for match in matches:
-                    if match.strip() and len(match.strip()) > 2:
-                        return match.strip()
+                    cleaned = match.strip()
+                    if not cleaned or len(cleaned) <= 2:
+                        continue
+                    if looks_like_domain(cleaned):
+                        found_domain_like = True
+                        continue
+                    return cleaned
+
+    # If we only found domain-like values, treat as blank/none rather than "Not Found"
+    if found_domain_like:
+        return ""
 
     return 'Not Found'
 
@@ -103,7 +131,7 @@ def extract_site_domains_from_config(action_settings):
         # pfConfig domains patterns - Handle both : and = after domains, with comments and newlines
         r'domains\s*[=:]\s*\{[^}]*?dev\s*:\s*["\'"]+([^"\'<]+?)["\'"]+[^}]*?prod\s*:\s*["\'"]+([^"\'<]+?)["\'"]+',
         r'domains\s*[=:]\s*\{[^}]*?prod\s*:\s*["\'"]+([^"\'<]+?)["\'"]+[^}]*?dev\s*:\s*["\'"]+([^"\'<]+?)["\'"]+',
-        
+
         # Traditional domain patterns
         r's\.server\s*=\s*["\']([^"\']+)["\']',
         r'["\']server["\']?\s*[:=]\s*["\']([^"\']+)["\']',
@@ -113,19 +141,21 @@ def extract_site_domains_from_config(action_settings):
         r'["\']trackingServer["\']?\s*[:=]\s*["\']([^"\']+)["\']',
         r'measurement["\']?\s*[:=]\s*["\']([^"\']+)["\']',
         r'["\']measurement["\']?\s*[:=]\s*["\']([^"\']+)["\']',
-        
+
         # Domain patterns in comments or descriptions
         r'domain[^:]*:\s*["\']([^"\']+)["\']',
         r'site\s*domain[^:]*:\s*["\']([^"\']+)["\']',
         r'host[^:]*:\s*["\']([^"\']+)["\']'
     ]
-    
+
     # Patterns to EXCLUDE (these are RSIDs, not domains)
     rsid_patterns = [
-        r'^[a-z]+global[a-z]+(dev|prod|development|production)$',  # e.g., pfizerglobalimpatientsprod
-        r'^[a-z]+[a-z0-9]+(dev|prod|development|production|staging)$',  # Generic RSID pattern
+        # e.g., pfizerglobalimpatientsprod
+        r'^[a-z]+global[a-z]+(dev|prod|development|production)$',
+        # Generic RSID pattern
+        r'^[a-z]+[a-z0-9]+(dev|prod|development|production|staging)$',
     ]
-    
+
     # Placeholder patterns to exclude
     placeholder_patterns = [
         r'<<.*>>',  # Template placeholders
@@ -135,24 +165,29 @@ def extract_site_domains_from_config(action_settings):
     text_to_analyze = ' '.join(action_settings)
 
     for pattern in site_domain_patterns:
-        matches = re.findall(pattern, text_to_analyze, re.IGNORECASE | re.DOTALL)
+        matches = re.findall(pattern, text_to_analyze,
+                             re.IGNORECASE | re.DOTALL)
         if matches:
             # Handle tuple matches from dev/prod patterns
             if isinstance(matches[0], tuple):
                 dev_domain, prod_domain = matches[0]
-                
+
                 # Validate that these are NOT RSIDs or placeholders
-                is_prod_rsid = any(re.match(rsid_pat, prod_domain.strip(), re.IGNORECASE) for rsid_pat in rsid_patterns)
-                is_prod_placeholder = any(re.search(ph_pat, prod_domain.strip(), re.IGNORECASE) for ph_pat in placeholder_patterns)
-                
+                is_prod_rsid = any(re.match(rsid_pat, prod_domain.strip(
+                ), re.IGNORECASE) for rsid_pat in rsid_patterns)
+                is_prod_placeholder = any(re.search(
+                    ph_pat, prod_domain.strip(), re.IGNORECASE) for ph_pat in placeholder_patterns)
+
                 # ONLY return prod value (we don't care about dev)
                 if not is_prod_rsid and not is_prod_placeholder and prod_domain and prod_domain.strip():
                     return prod_domain.strip()
             else:
                 # Handle single matches - validate not an RSID or placeholder
                 for match in matches:
-                    is_rsid = any(re.match(rsid_pat, match.strip(), re.IGNORECASE) for rsid_pat in rsid_patterns)
-                    is_placeholder = any(re.search(ph_pat, match.strip(), re.IGNORECASE) for ph_pat in placeholder_patterns)
+                    is_rsid = any(re.match(rsid_pat, match.strip(), re.IGNORECASE)
+                                  for rsid_pat in rsid_patterns)
+                    is_placeholder = any(re.search(ph_pat, match.strip(
+                    ), re.IGNORECASE) for ph_pat in placeholder_patterns)
                     if not is_rsid and not is_placeholder and match.strip() and len(match.strip()) > 2:
                         return match.strip()
 
@@ -170,7 +205,7 @@ def extract_site_names_from_config(action_settings):
         # Handle both : and = after siteNames, with comments and newlines
         r'siteNames\s*[=:]\s*\{[^}]*?dev\s*:\s*["\'"]+([^"\'<]+?)["\'"]+[^}]*?prod\s*:\s*["\'"]+([^"\'<]+?)["\'"]+',
         r'siteNames\s*[=:]\s*\{[^}]*?prod\s*:\s*["\'"]+([^"\'<]+?)["\'"]+[^}]*?dev\s*:\s*["\'"]+([^"\'<]+?)["\'"]+',
-        
+
         # Traditional site name patterns (existing eVar61 patterns)
         r'evar61["\']?\s*[:=]\s*["\']([^"\']+)["\']',
         r's\.eVar61["\']?\s*[:=]\s*["\']([^"\']+)["\']',
@@ -178,7 +213,7 @@ def extract_site_names_from_config(action_settings):
         r'variables\.eVar61["\']?\s*[:=]\s*["\']([^"\']+)["\']',
         r'setEVar\(61,\s*["\']([^"\']+)["\']',
         r's\.eVar61\s*=\s*["\']([^"\']+)["\']',
-        
+
         # Site Name variations
         r'site_name["\']?\s*[:=]\s*["\']([^"\']+)["\']',
         r'["\']site_name["\']?\s*[:=]\s*["\']([^"\']+)["\']',
@@ -191,26 +226,28 @@ def extract_site_names_from_config(action_settings):
         r'setSiteName\(["\']([^"\']+)["\']',
         r's\.siteName\s*=\s*["\']([^"\']+)["\']',
         r's\.site_name\s*=\s*["\']([^"\']+)["\']',
-        
+
         # Other common variations
         r'website_name["\']?\s*[:=]\s*["\']([^"\']+)["\']',
         r'["\']website_name["\']?\s*[:=]\s*["\']([^"\']+)["\']',
         r'websiteName["\']?\s*[:=]\s*["\']([^"\']+)["\']',
         r'["\']websiteName["\']?\s*[:=]\s*["\']([^"\']+)["\']',
-        
+
         # Context-based patterns (might appear in comments or descriptions)
         r'"site name"[^:]*:\s*["\']([^"\']+)["\']',
         r'"siteName"[^:]*:\s*["\']([^"\']+)["\']',
         r'Site Name[:\s]*["\']([^"\']+)["\']',
         r'SITE_NAME[:\s]*["\']([^"\']+)["\']'
     ]
-    
+
     # Patterns to EXCLUDE (these are RSIDs, not site names, or placeholders)
     rsid_patterns = [
-        r'^[a-z]+global[a-z]+(dev|prod|development|production)$',  # e.g., pfizerglobalimpatientsprod
-        r'^[a-z]+[a-z0-9]+(dev|prod|development|production|staging)$',  # Generic RSID pattern
+        # e.g., pfizerglobalimpatientsprod
+        r'^[a-z]+global[a-z]+(dev|prod|development|production)$',
+        # Generic RSID pattern
+        r'^[a-z]+[a-z0-9]+(dev|prod|development|production|staging)$',
     ]
-    
+
     # Placeholder patterns to exclude
     placeholder_patterns = [
         r'<<.*>>',  # Template placeholders like <<US PCC Dev Asset-Name>>
@@ -220,24 +257,29 @@ def extract_site_names_from_config(action_settings):
     text_to_analyze = ' '.join(action_settings)
 
     for pattern in site_name_patterns:
-        matches = re.findall(pattern, text_to_analyze, re.IGNORECASE | re.DOTALL)
+        matches = re.findall(pattern, text_to_analyze,
+                             re.IGNORECASE | re.DOTALL)
         if matches:
             # Handle tuple matches from dev/prod patterns
             if isinstance(matches[0], tuple):
                 dev_name, prod_name = matches[0]
-                
+
                 # Validate that these are NOT RSIDs or placeholders
-                is_prod_rsid = any(re.match(rsid_pat, prod_name.strip(), re.IGNORECASE) for rsid_pat in rsid_patterns)
-                is_prod_placeholder = any(re.search(ph_pat, prod_name.strip(), re.IGNORECASE) for ph_pat in placeholder_patterns)
-                
+                is_prod_rsid = any(re.match(rsid_pat, prod_name.strip(
+                ), re.IGNORECASE) for rsid_pat in rsid_patterns)
+                is_prod_placeholder = any(re.search(
+                    ph_pat, prod_name.strip(), re.IGNORECASE) for ph_pat in placeholder_patterns)
+
                 # ONLY return prod value (we don't care about dev)
                 if not is_prod_rsid and not is_prod_placeholder and prod_name and prod_name.strip():
                     return prod_name.strip()
             else:
                 # Handle single matches - validate not an RSID or placeholder
                 for match in matches:
-                    is_rsid = any(re.match(rsid_pat, match.strip(), re.IGNORECASE) for rsid_pat in rsid_patterns)
-                    is_placeholder = any(re.search(ph_pat, match.strip(), re.IGNORECASE) for ph_pat in placeholder_patterns)
+                    is_rsid = any(re.match(rsid_pat, match.strip(), re.IGNORECASE)
+                                  for rsid_pat in rsid_patterns)
+                    is_placeholder = any(re.search(ph_pat, match.strip(
+                    ), re.IGNORECASE) for ph_pat in placeholder_patterns)
                     if not is_rsid and not is_placeholder and match.strip() and len(match.strip()) > 2:
                         return match.strip()
 
@@ -256,7 +298,7 @@ def extract_site_name_from_evar61(action_settings):
         # Handle both : and = after siteNames, with comments and newlines
         r'siteNames\s*[=:]\s*\{[^}]*?dev\s*:\s*["\'"]+([^"\'<]+?)["\'"]+[^}]*?prod\s*:\s*["\'"]+([^"\'<]+?)["\'"]+',
         r'siteNames\s*[=:]\s*\{[^}]*?prod\s*:\s*["\'"]+([^"\'<]+?)["\'"]+[^}]*?dev\s*:\s*["\'"]+([^"\'<]+?)["\'"]+',
-        
+
         # Traditional site name patterns (existing eVar61 patterns)
         r'evar61["\']?\s*[:=]\s*["\']([^"\']+)["\']',
         r's\.eVar61["\']?\s*[:=]\s*["\']([^"\']+)["\']',
@@ -264,7 +306,7 @@ def extract_site_name_from_evar61(action_settings):
         r'variables\.eVar61["\']?\s*[:=]\s*["\']([^"\']+)["\']',
         r'setEVar\(61,\s*["\']([^"\']+)["\']',
         r's\.eVar61\s*=\s*["\']([^"\']+)["\']',
-        
+
         # Site Name variations
         r'site_name["\']?\s*[:=]\s*["\']([^"\']+)["\']',
         r'["\']site_name["\']?\s*[:=]\s*["\']([^"\']+)["\']',
@@ -277,26 +319,28 @@ def extract_site_name_from_evar61(action_settings):
         r'setSiteName\(["\']([^"\']+)["\']',
         r's\.siteName\s*=\s*["\']([^"\']+)["\']',
         r's\.site_name\s*=\s*["\']([^"\']+)["\']',
-        
+
         # Other common variations
         r'website_name["\']?\s*[:=]\s*["\']([^"\']+)["\']',
         r'["\']website_name["\']?\s*[:=]\s*["\']([^"\']+)["\']',
         r'websiteName["\']?\s*[:=]\s*["\']([^"\']+)["\']',
         r'["\']websiteName["\']?\s*[:=]\s*["\']([^"\']+)["\']',
-        
+
         # Context-based patterns (might appear in comments or descriptions)
         r'"site name"[^:]*:\s*["\']([^"\']+)["\']',
         r'"siteName"[^:]*:\s*["\']([^"\']+)["\']',
         r'Site Name[:\s]*["\']([^"\']+)["\']',
         r'SITE_NAME[:\s]*["\']([^"\']+)["\']'
     ]
-    
+
     # Patterns to EXCLUDE (these are RSIDs, not site names) - SAME AS extract_site_names_from_config
     rsid_patterns = [
-        r'^[a-z]+global[a-z]+(dev|prod|development|production)$',  # e.g., pfizerglobalimpatientsprod
-        r'^[a-z]+[a-z0-9]+(dev|prod|development|production|staging)$',  # Generic RSID pattern
+        # e.g., pfizerglobalimpatientsprod
+        r'^[a-z]+global[a-z]+(dev|prod|development|production)$',
+        # Generic RSID pattern
+        r'^[a-z]+[a-z0-9]+(dev|prod|development|production|staging)$',
     ]
-    
+
     # Placeholder patterns to exclude - SAME AS extract_site_names_from_config
     placeholder_patterns = [
         r'<<.*>>',  # Template placeholders like <<US PCC Dev Asset-Name>>
@@ -306,24 +350,29 @@ def extract_site_name_from_evar61(action_settings):
     text_to_analyze = ' '.join(action_settings)
 
     for pattern in site_name_patterns:
-        matches = re.findall(pattern, text_to_analyze, re.IGNORECASE | re.DOTALL)
+        matches = re.findall(pattern, text_to_analyze,
+                             re.IGNORECASE | re.DOTALL)
         if matches:
             # Handle tuple matches from dev/prod patterns
             if isinstance(matches[0], tuple):
                 dev_name, prod_name = matches[0]
-                
+
                 # Validate that these are NOT RSIDs or placeholders
-                is_prod_rsid = any(re.match(rsid_pat, prod_name.strip(), re.IGNORECASE) for rsid_pat in rsid_patterns)
-                is_prod_placeholder = any(re.search(ph_pat, prod_name.strip(), re.IGNORECASE) for ph_pat in placeholder_patterns)
-                
+                is_prod_rsid = any(re.match(rsid_pat, prod_name.strip(
+                ), re.IGNORECASE) for rsid_pat in rsid_patterns)
+                is_prod_placeholder = any(re.search(
+                    ph_pat, prod_name.strip(), re.IGNORECASE) for ph_pat in placeholder_patterns)
+
                 # ONLY return prod value (we don't care about dev) - SAME AS extract_site_names_from_config
                 if not is_prod_rsid and not is_prod_placeholder and prod_name and prod_name.strip():
                     return prod_name.strip()
             else:
                 # Handle single matches - validate not an RSID or placeholder
                 for match in matches:
-                    is_rsid = any(re.match(rsid_pat, match.strip(), re.IGNORECASE) for rsid_pat in rsid_patterns)
-                    is_placeholder = any(re.search(ph_pat, match.strip(), re.IGNORECASE) for ph_pat in placeholder_patterns)
+                    is_rsid = any(re.match(rsid_pat, match.strip(), re.IGNORECASE)
+                                  for rsid_pat in rsid_patterns)
+                    is_placeholder = any(re.search(ph_pat, match.strip(
+                    ), re.IGNORECASE) for ph_pat in placeholder_patterns)
                     if not is_rsid and not is_placeholder and match.strip() and len(match.strip()) > 2:
                         return match.strip()
 
@@ -444,7 +493,7 @@ def extract_cja_tech_strategy_data(df):
         report_suites = extract_report_suites_from_config(action_settings)
         site_domains = extract_site_domains_from_config(action_settings)
         site_names = extract_site_names_from_config(action_settings)
-        
+
         # Extract traditional data for fallback
         site_name_evar61 = extract_site_name_from_evar61(action_settings)
         server_domain = extract_server_domain_from_actions(
@@ -466,9 +515,30 @@ def extract_cja_tech_strategy_data(df):
         if final_server_domain == 'Not Found':
             final_server_domain = server_domain
 
+        # Split Report Suites into Dev/Prod columns when possible
+        rsid_dev = ''
+        rsid_prod = ''
+        if isinstance(report_suites, str):
+            # Look for explicit Dev/Prod labels
+            dev_match = re.search(
+                r"Dev:\s*([^,]+)", report_suites, re.IGNORECASE)
+            prod_match = re.search(
+                r"Prod:\s*([^,]+)", report_suites, re.IGNORECASE)
+            if dev_match:
+                rsid_dev = dev_match.group(1).strip()
+            if prod_match:
+                rsid_prod = prod_match.group(1).strip()
+            # If no labeled values but we have a single RSID string, prefer Prod
+            if not rsid_dev and not rsid_prod:
+                single = report_suites.strip()
+                if single and single.lower() != 'not found':
+                    rsid_prod = single
+
         results.append({
             'Web Property': property_name,
             'Report Suites': report_suites,
+            'RSID (Dev)': rsid_dev,
+            'RSID (Prod)': rsid_prod,
             'Site Domains': final_server_domain,
             'Site Names': final_site_name,
             'Site Name (eVar 61)': site_name_evar61,  # Keep for comparison
@@ -497,7 +567,7 @@ def save_cja_tech_strategy_to_csv(results):
     print(
         f"Properties with detected CMS: {sum(1 for r in results if r['Content Management System'] != 'Not Detected')}")
     print(
-        f"Properties with Report Suites found: {sum(1 for r in results if r['Report Suites'] != 'Not Found')}")
+        f"Properties with RSIDs found: {sum(1 for r in results if (r.get('RSID (Dev)', '').strip() or r.get('RSID (Prod)', '').strip()))}")
     print(
         f"Properties with Site Domains found: {sum(1 for r in results if r['Site Domains'] != 'Not Found')}")
     print(
